@@ -25,7 +25,7 @@ class CtmQuadLightTest {
 		data[uv1] = 0x00A000F0;
 		BakedQuad input = new BakedQuad(data, -1, EnumFacing.NORTH, sprite, true, DefaultVertexFormats.BLOCK);
 		CtmDefinition definition = CtmMcmetaParser.parse(new ResourceLocation("test:glow"),
-				JsonParser.parseString("{\"extra\":{\"light\":4}}").getAsJsonObject(), "test", 0);
+				JsonParser.parseString("{\"ctm_version\":1,\"extra\":{\"light\":4}}").getAsJsonObject(), "test", 0);
 		CtmQuadProcessor processor = new CtmQuadProcessor(definition, new TextureAtlasSprite[]{sprite});
 
 		List<BakedQuad> output = new ArrayList<>();
@@ -47,7 +47,7 @@ class CtmQuadLightTest {
 		int[] data = new int[4 * DefaultVertexFormats.ITEM.getIntegerSize()];
 		BakedQuad input = new BakedQuad(data, -1, EnumFacing.NORTH, sprite, true, DefaultVertexFormats.ITEM);
 		CtmDefinition definition = CtmMcmetaParser.parse(new ResourceLocation("test:glow"),
-				JsonParser.parseString("{\"extra\":{\"light\":4}}").getAsJsonObject(), "test", 0);
+				JsonParser.parseString("{\"ctm_version\":1,\"extra\":{\"light\":4}}").getAsJsonObject(), "test", 0);
 		CtmQuadProcessor processor = new CtmQuadProcessor(definition, new TextureAtlasSprite[]{sprite});
 
 		List<BakedQuad> output = new ArrayList<>();

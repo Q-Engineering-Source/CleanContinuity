@@ -16,7 +16,7 @@ class CtmConnectToTest {
 	void explicitBlockListConnectsAcrossAllowedBlocksOnly() {
 		Bootstrap.register();
 		CtmDefinition definition = CtmMcmetaParser.parse(new ResourceLocation("test:tile"),
-				JsonParser.parseString("{\"extra\":{\"connect_to\":[{\"block\":\"minecraft:stone\"},{\"block\":\"minecraft:glass\"}]}}").getAsJsonObject(),
+				JsonParser.parseString("{\"ctm_version\":1,\"extra\":{\"connect_to\":[{\"block\":\"minecraft:stone\"},{\"block\":\"minecraft:glass\"}]}}").getAsJsonObject(),
 				"test", 0);
 		CtmConnectionPredicate predicate = CtmConnectionPredicate.fromProperties(definition, true);
 		BlockPos from = BlockPos.ORIGIN;

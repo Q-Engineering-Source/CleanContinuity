@@ -15,7 +15,7 @@ class CtmRenderLayerRouterTest {
 	@Test
 	void routedTextureLeavesTheOriginalLayerWhileOrdinaryTextureStaysThere() {
 		CtmDefinition definition = CtmMcmetaParser.parse(new ResourceLocation("test:glow_e"),
-				JsonParser.parseString("{\"layer\":\"CUTOUT\"}").getAsJsonObject(), "test", 0);
+				JsonParser.parseString("{\"ctm_version\":1,\"layer\":\"CUTOUT\"}").getAsJsonObject(), "test", 0);
 		CtmRenderLayerRouter.reload(List.of(definition));
 		try {
 			TextureAtlasSprite glow = new Sprite("test:glow_e");
@@ -38,7 +38,7 @@ class CtmRenderLayerRouterTest {
 	@Test
 	void optedInEmissiveTextureRendersInOriginalAndBloomLayers() {
 		CtmDefinition definition = CtmMcmetaParser.parse(new ResourceLocation("test:glow_e"),
-				JsonParser.parseString("{\"layer\":\"CUTOUT\",\"extra\":{\"emissive_fallback\":true}}")
+				JsonParser.parseString("{\"ctm_version\":1,\"layer\":\"CUTOUT\",\"extra\":{\"emissive_fallback\":true}}")
 						.getAsJsonObject(), "test", 0);
 		CtmRenderLayerRouter.reload(List.of(definition));
 		try {
