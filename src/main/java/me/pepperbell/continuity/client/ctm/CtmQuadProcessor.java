@@ -72,6 +72,13 @@ public class CtmQuadProcessor implements QuadProcessor {
 	}
 
 	protected void transformQuad(BakedQuad quad, TextureAtlasSprite sprite, IBlockAccess level, BlockPos pos, IBlockState appearanceState, IBlockState state, long rand, List<BakedQuad> out) {
+		// CTM Vintage proxy metadata replaces the base sprite before the texture implementation
+		// transforms UVs. Mirror that here while keeping the source model's geometry intact.
+		if (sprite != null && sprites.length > 0
+				&& !sprite.getIconName().equals(sprites[0].getIconName())) {
+			quad = QuadClipper.transformUVs(quad, sprite, sprites[0], CtmSubmap.X1);
+			sprite = sprites[0];
+		}
 		EnumFacing face = quad.getFace();
 		switch (type) {
 			case NORMAL -> handleNormal(quad, sprite, out);
@@ -106,11 +113,12 @@ public class CtmQuadProcessor implements QuadProcessor {
 
 	protected void handleCtm(BakedQuad quad, TextureAtlasSprite sprite, IBlockAccess level, BlockPos pos, IBlockState appearanceState, IBlockState state, EnumFacing face, List<BakedQuad> out) {
 		int connections = connectionMap.compute(level, pos, appearanceState, state, face, sprite);
-		handleCtmWithConnections(quad, sprite, connections, out);
+		handleCtmWithConnections(quad, sprite, connections, out, false);
 	}
 
-	protected void handleCtmWithConnections(BakedQuad quad, TextureAtlasSprite sprite, int connections, List<BakedQuad> out) {
-		int[] submapIndices = CtmCtmLogic.getSubmapIndices(connections, connectionMap);
+	protected void handleCtmWithConnections(BakedQuad quad, TextureAtlasSprite sprite, int connections,
+			List<BakedQuad> out, boolean includeIsolatedCorners) {
+		int[] submapIndices = CtmCtmLogic.getSubmapIndices(connections, connectionMap, includeIsolatedCorners);
 
 		TextureAtlasSprite baseSprite = sprites[0];
 		TextureAtlasSprite ctmSheet = sprites.length > 1 ? sprites[1] : baseSprite;
@@ -190,16 +198,16 @@ public class CtmQuadProcessor implements QuadProcessor {
 	}
 
 	protected void handlePillar(BakedQuad quad, TextureAtlasSprite sprite, IBlockAccess level, BlockPos pos, IBlockState appearanceState, IBlockState state, EnumFacing face, List<BakedQuad> out) {
-		// Pillar logic: check the 6 world neighbors, apply CTM's priority pruning (vertical beats
-		// east/west beats north/south), then pick a 2x2 cell of the pillar sheet and rotate it.
+		// CTM Vintage pillar checks raw IBlockState identity and does not use the custom CTM
+		// connection options (connect_to, ignore_states, or use_actual_state).
 		TextureAtlasSprite base = sprites[0];
 		TextureAtlasSprite pillar = sprites.length > 1 ? sprites[1] : base;
+		IBlockState pillarState = level.getBlockState(pos);
 
 		// connections of the current block per facing
 		EnumSet<EnumFacing> connections = EnumSet.noneOf(EnumFacing.class);
 		for (EnumFacing f : EnumFacing.VALUES) {
-			BlockPos other = pos.offset(f);
-			if (connectionPredicate.shouldConnect(level, pos, appearanceState, state, other, face, sprite)) {
+			if (level.getBlockState(pos.offset(f)) == pillarState) {
 				connections.add(f);
 			}
 		}
@@ -208,13 +216,12 @@ public class CtmQuadProcessor implements QuadProcessor {
 		Map<EnumFacing, EnumSet<EnumFacing>> neighborConnections = new EnumMap<>(EnumFacing.class);
 		for (EnumFacing f : EnumFacing.VALUES) {
 			BlockPos other = pos.offset(f);
-			IBlockState otherState = level.getBlockState(other);
-			IBlockState otherAppearance = otherState.getActualState(level, other);
 			EnumSet<EnumFacing> set = EnumSet.noneOf(EnumFacing.class);
-			for (EnumFacing f2 : EnumFacing.VALUES) {
-				BlockPos other2 = other.offset(f2);
-				if (connectionPredicate.shouldConnect(level, other, otherAppearance, otherState, other2, f2, sprite)) {
-					set.add(f2);
+			if (level.getBlockState(other) == pillarState) {
+				for (EnumFacing f2 : EnumFacing.VALUES) {
+					if (level.getBlockState(other.offset(f2)) == pillarState) {
+						set.add(f2);
+					}
 				}
 			}
 			neighborConnections.put(f, set);
@@ -323,9 +330,9 @@ public class CtmQuadProcessor implements QuadProcessor {
 		int[] outputIds = logic.getOutputsForState(key);
 		for (int outputId : outputIds) {
 			CtmCustomLogic.OutputFace output = logic.getOutput(outputId);
-			TextureAtlasSprite target = sprites[Math.min(output.tex(), sprites.length - 1)];
+			TextureAtlasSprite target = sprites[output.tex()];
 			BakedQuad clipped = QuadClipper.clip(quad, sprite, output.face());
-			clipped = QuadClipper.transformUVs(clipped, sprite, target, output.uvs());
+			clipped = QuadClipper.setUVs(clipped, target, output.uvs());
 			out.add(clipped);
 		}
 	}
@@ -338,13 +345,12 @@ public class CtmQuadProcessor implements QuadProcessor {
 		TextureAtlasSprite base = sprites[0];
 		int width = properties.getMapWidth();
 		int height = properties.getMapHeight();
-		int xOffset = properties.getMapXOffset();
-		int yOffset = properties.getMapYOffset();
+		BlockPos mapPosition = pos.add(getFaceOffset(face, properties.getMapXOffset(), properties.getMapYOffset()));
 
 		int x;
 		int y;
 		if (type == CtmType.RANDOM) {
-			Random rng = new Random(MathHelper.getPositionRandom(pos) + face.ordinal());
+			Random rng = new Random(MathHelper.getPositionRandom(mapPosition) + face.ordinal());
 			rng.nextBoolean(); // consume one value to match the reference seeding
 			x = rng.nextInt(width) + 1;
 			y = rng.nextInt(height) + 1;
@@ -356,9 +362,9 @@ public class CtmQuadProcessor implements QuadProcessor {
 		}
 
 		// Patterned: world-coordinate modulo
-		int px = pos.getX();
-		int py = pos.getY();
-		int pz = pos.getZ();
+		int px = mapPosition.getX();
+		int py = mapPosition.getY();
+		int pz = mapPosition.getZ();
 		int tx;
 		int ty;
 		EnumFacing.Axis faceAxis = face.getAxis();
@@ -387,47 +393,42 @@ public class CtmQuadProcessor implements QuadProcessor {
 		out.add(QuadClipper.transformUVs(quad, base, base, cell));
 	}
 
+	private static BlockPos getFaceOffset(EnumFacing face, int xOffset, int yOffset) {
+		return switch (face) {
+			case DOWN -> new BlockPos(xOffset, 0, yOffset);
+			case NORTH -> new BlockPos(-xOffset, yOffset, 0);
+			case SOUTH -> new BlockPos(xOffset, yOffset, 0);
+			case WEST -> new BlockPos(0, yOffset, xOffset);
+			case EAST -> new BlockPos(0, yOffset, -xOffset);
+			default -> new BlockPos(xOffset, 0, -yOffset);
+		};
+	}
+
 	protected void handleEdges(BakedQuad quad, TextureAtlasSprite sprite, IBlockAccess level, BlockPos pos, IBlockState appearanceState, IBlockState state, EnumFacing face, List<BakedQuad> out) {
-		// Edges: classic CTM with an extra "obscured" sprite (sprites[2]) used when the face is
-		// directly blocked by a matching block. Delegates to the CTM logic otherwise.
+		CtmEdgesConnectionMap.Result result = CtmEdgesConnectionMap.compute(level, pos, state, face, connectionPredicate);
 		TextureAtlasSprite base = sprites[0];
-		TextureAtlasSprite ctmSheet = sprites.length > 1 ? sprites[1] : base;
 		TextureAtlasSprite obscured = sprites.length > 2 ? sprites[2] : base;
 
-		// Check the obscured case: the block directly in front of the face (in the face normal
-		// direction) also connects.
-		boolean isObscured = false;
-		BlockPos inFront = pos.offset(face);
-		if (connectionPredicate.shouldConnect(level, pos, appearanceState, state, inFront, face, sprite)) {
-			isObscured = true;
-		}
-
-		if (isObscured) {
+		if (result.obscured()) {
 			// Render the whole face from the obscured sprite, subdivided into 4
 			for (BakedQuad q : QuadClipper.subdivide4(quad, base)) {
-				out.add(QuadClipper.transformUVs(QuadClipper.grow(q, base), base, obscured, CtmSubmap.X1));
+				out.add(QuadClipper.transformUVs(q, base, obscured, CtmSubmap.X1));
 			}
 			return;
 		}
 
-		// Otherwise classic CTM logic
-		handleCtm(quad, sprite, level, pos, appearanceState, state, face, out);
+		// CTM Vintage gives an isolated diagonal a corner tile for the edges type.
+		handleCtmWithConnections(quad, sprite, result.connections(), out, true);
 	}
 
 	protected void handleEdgesFull(BakedQuad quad, TextureAtlasSprite sprite, IBlockAccess level, BlockPos pos, IBlockState appearanceState, IBlockState state, EnumFacing face, List<BakedQuad> out) {
 		// EdgesFull: 16-cell selection over the full 4x4 sheet, one quad per face.
-		int connections = connectionMap.compute(level, pos, appearanceState, state, face, sprite);
+		CtmEdgesConnectionMap.Result result = CtmEdgesConnectionMap.compute(level, pos, state, face, connectionPredicate);
 		TextureAtlasSprite base = sprites[0];
 		TextureAtlasSprite sheet = sprites.length > 1 ? sprites[1] : base;
 
-		boolean isObscured = false;
-		BlockPos inFront = pos.offset(face);
-		if (connectionPredicate.shouldConnect(level, pos, appearanceState, state, inFront, face, sprite)) {
-			isObscured = true;
-		}
-
 		CtmSubmap[][] x4 = CtmSubmap.x4Grid();
-		CtmSubmap cell = edgesFullCell(connections, isObscured, x4);
+		CtmSubmap cell = edgesFullCell(result.connections(), result.obscured(), x4);
 		if (cell == null) {
 			// full normal texture
 			out.add(QuadClipper.transformUVs(quad, base, base, CtmSubmap.X1));
@@ -438,6 +439,9 @@ public class CtmQuadProcessor implements QuadProcessor {
 
 	/** Returns the 4x4 cell for the given connection map, or null for the full normal texture. */
 	private CtmSubmap edgesFullCell(int connections, boolean isObscured, CtmSubmap[][] x4) {
+		if (isObscured) {
+			return x4[2][1];
+		}
 		boolean top = connectionMap.connected(connections, CtmDir.TOP)
 				|| connectionMap.connectedAnd(connections, CtmDir.TOP_LEFT, CtmDir.TOP_RIGHT);
 		boolean right = connectionMap.connected(connections, CtmDir.RIGHT)
@@ -452,7 +456,7 @@ public class CtmQuadProcessor implements QuadProcessor {
 		if (!any) {
 			return null;
 		}
-		if (isObscured || (top && bottom) || (right && left)) {
+		if ((top && bottom) || (right && left)) {
 			return x4[2][1];
 		}
 		if (!top && !right && !bottom && !left) {
@@ -511,15 +515,15 @@ public class CtmQuadProcessor implements QuadProcessor {
 	}
 
 	protected void handleEldritch(BakedQuad quad, TextureAtlasSprite sprite, IBlockAccess level, BlockPos pos, IBlockState appearanceState, IBlockState state, long rand, List<BakedQuad> out) {
-		// Eldritch: 4 subdivided quads, each with a small UV jitter seeded by position+face.
+		// Match CTM Vintage's deterministic Gaussian jitter, seeded by the wrapped 8x8 position
+		// and the face normal. The shared inner corner is the only UV vertex moved in each tile.
 		TextureAtlasSprite base = sprites[0];
-		BakedQuad[] quads = QuadClipper.subdivide4(quad, base);
-		Random rng = new Random(MathHelper.getPositionRandom(pos));
-		for (BakedQuad q : quads) {
-			BakedQuad grown = QuadClipper.grow(q, base);
-			float du = (rng.nextFloat() - 0.5f) * 0.16f;
-			float dv = (rng.nextFloat() - 0.5f) * 0.16f;
-			out.add(QuadClipper.transformUVs(grown, base, base, CtmSubmap.fromUnitScale(1f + du, 1f + dv, -du / 2f, -dv / 2f)));
+		BlockPos wrapped = new BlockPos(pos.getX() & 7, pos.getY() & 7, pos.getZ() & 7);
+		Random rng = new Random(MathHelper.getPositionRandom(wrapped) + quad.getFace().ordinal());
+		float offsetU = (float) rng.nextGaussian() * 0.08f;
+		float offsetV = (float) rng.nextGaussian() * 0.08f;
+		for (BakedQuad q : QuadClipper.subdivide4(quad, base)) {
+			out.add(QuadClipper.offsetInteriorUv(q, quad, base, offsetU, offsetV));
 		}
 	}
 

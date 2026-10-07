@@ -45,7 +45,9 @@ public class CtmCachingPredicates implements CachingPredicates {
 
 	@Override
 	public boolean isValidForMultipass() {
-		return true;
+		// CTM Vintage transforms the texture's source quad once; generated texture sprites are not
+		// recursively interpreted as another CTM definition.
+		return false;
 	}
 
 	public static class Factory<T extends CtmDefinition> implements CachingPredicates.Factory<T> {

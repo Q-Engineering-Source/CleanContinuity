@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import javax.annotation.Nullable;
 
 import java.util.Map;
+import java.util.Locale;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -35,21 +36,20 @@ public final class CtmDefinitionManager {
 	public static void reload() {
 		IResourceManager resourceManager = Minecraft.getMinecraft().getResourceManager();
 		clear();
-		try {
-			for (String domain : resourceManager.getResourceDomains()) {
-				try {
-					for (IResource ctmFile : resourceManager.getAllResources(new ResourceLocation(domain, "ctm.json"))) {
-						try (InputStreamReader reader = new InputStreamReader(ctmFile.getInputStream(), StandardCharsets.UTF_8)) {
-							JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
-							loadLogics(domain, json, resourceManager);
-						}
+		for (String domain : resourceManager.getResourceDomains()) {
+			try {
+				for (IResource ctmFile : resourceManager.getAllResources(new ResourceLocation(domain, "ctm.json"))) {
+					try (IResource resource = ctmFile;
+							InputStreamReader reader = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) {
+						JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
+						loadLogics(domain, json, resourceManager);
+					} catch (Exception e) {
+						ContinuityClient.LOGGER.warn("Invalid ctm.json in domain '{}'", domain, e);
 					}
-				} catch (IOException ignored) {
-					// no ctm.json in this domain
 				}
+			} catch (IOException ignored) {
+				// no ctm.json in this domain
 			}
-		} catch (Exception e) {
-			ContinuityClient.LOGGER.error("Failed to reload CTM logic definitions", e);
 		}
 	}
 
@@ -58,12 +58,14 @@ public final class CtmDefinitionManager {
 			for (var element : ctmFile.getAsJsonArray("logics")) {
 				String logicName = element.getAsString();
 				try {
-					IResource resource = resourceManager.getResource(new ResourceLocation(domain, "ctm_logic/" + logicName + ".json"));
-					try (InputStreamReader reader = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) {
+					try (IResource resource = resourceManager.getResource(new ResourceLocation(domain, "ctm_logic/" + logicName + ".json"));
+							InputStreamReader reader = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) {
 						JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
 						CtmLogicDefinition def = CtmLogicDefinition.fromJson(json);
 						CtmCustomLogic logic = CtmLogicBakery.bake(def);
-						String id = domain + ":" + logicName;
+						String resourcePath = resource.getResourceLocation().getPath();
+						String canonicalName = resourcePath.substring("ctm_logic/".length(), resourcePath.length() - ".json".length());
+						String id = resource.getResourceLocation().getNamespace() + ":" + canonicalName;
 						registerLogic(id, logic);
 						ContinuityClient.LOGGER.debug("Registered CTM logic '{}' with {} positions", id, def.positions.size());
 					}
@@ -75,12 +77,12 @@ public final class CtmDefinitionManager {
 	}
 
 	public static void registerLogic(String id, CtmCustomLogic logic) {
-		LOGICS.put(id, logic);
+		LOGICS.put(id.toLowerCase(Locale.ROOT), logic);
 	}
 
 	@Nullable
 	public static CtmCustomLogic getLogic(String id) {
-		return LOGICS.get(id);
+		return LOGICS.get(id.toLowerCase(Locale.ROOT));
 	}
 
 	public static void clear() {

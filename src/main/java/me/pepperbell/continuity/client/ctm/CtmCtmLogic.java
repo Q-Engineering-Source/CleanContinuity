@@ -39,15 +39,29 @@ public final class CtmCtmLogic {
 	 * @return array of 4 indices (0-19), ordered bottom-left, bottom-right, top-right, top-left
 	 */
 	public static int[] getSubmapIndices(int connections, CtmConnectionMap connectionMap) {
+		return getSubmapIndices(connections, connectionMap, false);
+	}
+
+	/**
+	 * The CTM Vintage {@code edges} logic also uses an isolated diagonal connection to select the
+	 * corresponding corner tile. Classic CTM leaves that quadrant on the base texture.
+	 */
+	public static int[] getSubmapIndices(int connections, CtmConnectionMap connectionMap, boolean includeIsolatedCorners) {
 		int[] submapCache = {18, 19, 17, 16};
 		for (int i = 0; i < 4; i++) {
-			fillSubmap(submapCache, i, connections, connectionMap);
+			fillSubmap(submapCache, i, connections, connectionMap, includeIsolatedCorners);
 		}
 		return submapCache;
 	}
 
-	private static void fillSubmap(int[] submapCache, int idx, int connections, CtmConnectionMap connectionMap) {
+	private static void fillSubmap(int[] submapCache, int idx, int connections, CtmConnectionMap connectionMap,
+			boolean includeIsolatedCorners) {
 		CtmDir[] dirs = SUBMAP_MAP[idx];
+		if (includeIsolatedCorners && !connectionMap.connectedOr(connections, dirs[0], dirs[1])
+				&& connectionMap.connected(connections, dirs[2])) {
+			submapCache[idx] = SUBMAP_OFFSETS[idx];
+			return;
+		}
 		if (connectionMap.connectedOr(connections, dirs[0], dirs[1])) {
 			if (connectionMap.connectedAnd(connections, dirs)) {
 				// All three (both edges + corner) connected -> base cell

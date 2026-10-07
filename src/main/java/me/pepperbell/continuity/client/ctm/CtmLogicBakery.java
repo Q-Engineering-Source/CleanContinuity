@@ -7,6 +7,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import me.pepperbell.continuity.client.ctm.CtmCustomLogic.LocalDirection;
 import me.pepperbell.continuity.client.ctm.CtmCustomLogic.OutputFace;
 import me.pepperbell.continuity.client.ctm.CtmLogicDefinition.MultiSubmap;
@@ -67,37 +69,44 @@ public final class CtmLogicBakery {
 			}
 		}
 
-		// Materialize the final outputs array
-		OutputFace[] outputFaces = new OutputFace[outputCount];
-		{
-			// texture index per output: first rule's "from" wins (the reference re-calls output()
-			// per rule, last write wins, but from is per-output so we take the first rule's from)
-			Map<String, Integer> fromByOutput = new HashMap<>();
-			for (Rule rule : def.rules) {
-				fromByOutput.putIfAbsent(rule.output(), rule.from());
-			}
-			Map<String, CtmSubmap> submapByOutput = new HashMap<>();
-			for (Map.Entry<String, MultiSubmap> e : def.submaps.entrySet()) {
-				for (NamedSubmap submap : e.getValue().forName(e.getKey())) {
-					submapByOutput.put(submap.name(), submap.submap());
-				}
-			}
-			for (int i = 0; i < outputCount; i++) {
-				String name = outputOrder.get(i);
-				CtmSubmap uvs = submapByOutput.get(name);
-				CtmSubmap face = CtmSubmap.X1;
-				outputFaces[i] = new OutputFace(fromByOutput.getOrDefault(name, 0), uvs, face);
+		Map<String, CtmSubmap> submapByOutput = new HashMap<>();
+		for (Map.Entry<String, MultiSubmap> e : def.submaps.entrySet()) {
+			for (NamedSubmap submap : e.getValue().forName(e.getKey())) {
+				submapByOutput.put(submap.name(), submap.submap());
 			}
 		}
 
-		// Desired state per output id (conditions merged across rules targeting the same output)
-		Map<Integer, DesiredState> desired = new HashMap<>();
+		// CTM Vintage calls output() for every rule. Repeated rules for one output therefore
+		// replace that output's texture index and face with the values from the last rule.
+		OutputFace[] outputFaces = new OutputFace[outputCount];
+		for (int i = 0; i < outputCount; i++) {
+			String name = outputOrder.get(i);
+			outputFaces[i] = new OutputFace(0, submapByOutput.get(name), CtmSubmap.X1);
+		}
 		for (Rule rule : def.rules) {
 			Integer id = outputIds.get(rule.output());
 			if (id == null) {
 				throw new IllegalArgumentException("Unknown output '" + rule.output() + "'");
 			}
-			DesiredState state = desired.computeIfAbsent(id, k -> new DesiredState(size, id));
+			CtmSubmap face = rule.at().map(faces::get).orElse(CtmSubmap.X1);
+			if (face == null) {
+				throw new IllegalArgumentException("Unknown face '" + rule.at().orElse("") + "'");
+			}
+			outputFaces[id] = new OutputFace(rule.from(), submapByOutput.get(rule.output()), face);
+		}
+
+		// Desired state per output id (conditions merged across rules targeting the same output)
+		Int2ObjectMap<DesiredState> desired = new Int2ObjectOpenHashMap<>();
+		for (Rule rule : def.rules) {
+			Integer id = outputIds.get(rule.output());
+			if (id == null) {
+				throw new IllegalArgumentException("Unknown output '" + rule.output() + "'");
+			}
+			DesiredState state = desired.get(id);
+			if (state == null) {
+				state = new DesiredState(size, id);
+				desired.put(id, state);
+			}
 			for (String connected : rule.connected()) {
 				Integer b = bitNames.get(connected);
 				if (b != null) {
@@ -110,13 +119,6 @@ public final class CtmLogicBakery {
 					state.with(b, Trinary.FALSE);
 				}
 			}
-			// The geometry face (from "at") is per-output; apply if not yet set
-			if (rule.at().isPresent()) {
-				CtmSubmap face = faces.get(rule.at().get());
-				if (face != null) {
-					outputFaces[id] = new OutputFace(outputFaces[id].tex(), outputFaces[id].uvs(), face);
-				}
-			}
 		}
 
 		// Build the full lookup table: every state -> ordered list of matching output ids
@@ -124,9 +126,9 @@ public final class CtmLogicBakery {
 		int[][] lookupArray = new int[max][];
 		for (int s = 0; s < max; s++) {
 			List<Integer> matches = new ArrayList<>();
-			for (Map.Entry<Integer, DesiredState> e : desired.entrySet()) {
+			for (Int2ObjectMap.Entry<DesiredState> e : desired.int2ObjectEntrySet()) {
 				if (e.getValue().test(s)) {
-					matches.add(e.getKey());
+					matches.add(e.getIntKey());
 				}
 			}
 			if (matches.isEmpty()) {

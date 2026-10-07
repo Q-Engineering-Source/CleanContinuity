@@ -134,21 +134,34 @@ public final class PropertiesParsingHelper {
 
 				String[] parts = blockStateStr.split(":");
 				ResourceLocation blockId;
+				Block block;
 				int startIndex;
-				if (parts.length == 1 || parts[1].contains("=")) {
-					blockId = new ResourceLocation(parts[0]);
+				if (isNumericBlockId(blockStateStr)) {
+					// OptiFine/MCPatcher packs for 1.12.2 commonly use legacy numeric block ids.
+					// Resolve them through the same registry used by vanilla's numeric block lookup.
+					try {
+						block = Block.getBlockById(Integer.parseInt(blockStateStr));
+					} catch (NumberFormatException e) {
+						block = null;
+					}
+					ResourceLocation registeredId = block == null ? null : Block.REGISTRY.getNameForObject(block);
+					blockId = registeredId == null ? new ResourceLocation("minecraft", blockStateStr) : registeredId;
 					startIndex = 1;
 				} else {
-					blockId = new ResourceLocation(parts[0], parts[1]);
-					startIndex = 2;
+					if (parts.length == 1 || parts[1].contains("=")) {
+						blockId = new ResourceLocation(parts[0]);
+						startIndex = 1;
+					} else {
+						blockId = new ResourceLocation(parts[0], parts[1]);
+						startIndex = 2;
+					}
+					block = Block.REGISTRY.getObject(blockId);
 				}
 
-				if (!Block.REGISTRY.containsKey(blockId)) {
+				if (block == null) {
 					ContinuityClient.LOGGER.warn("Unknown block '" + blockId + "' in '" + propertyKey + "' element '" + blockStateStr + "' at index " + i + " in file '" + fileLocation + "' in pack '" + packId + "'");
 					continue;
 				}
-
-				Block block = Block.REGISTRY.getObject(blockId);
 				if (blockSet.contains(block)) {
 					continue;
 				}
@@ -285,5 +298,17 @@ public final class PropertiesParsingHelper {
 		}
 
 		return Boolean.parseBoolean(optifineOnlyStr.trim());
+	}
+
+	private static boolean isNumericBlockId(String value) {
+		if (value.isEmpty()) {
+			return false;
+		}
+		for (int i = 0; i < value.length(); i++) {
+			if (!Character.isDigit(value.charAt(i))) {
+				return false;
+			}
+		}
+		return true;
 	}
 }

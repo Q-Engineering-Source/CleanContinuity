@@ -3,11 +3,14 @@ package me.pepperbell.continuity.client.ctm;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BiPredicate;
 
 import com.google.gson.JsonObject;
 
 import me.pepperbell.continuity.api.client.CtmProperties;
+import net.minecraft.block.state.IBlockState;
 import net.minecraft.util.BlockRenderLayer;
+import net.minecraft.util.EnumFacing;
 import net.minecraft.util.ResourceLocation;
 
 /**
@@ -35,7 +38,7 @@ public class CtmDefinition implements CtmProperties {
 	protected boolean useActualState;
 	protected Boolean connectInside; // null = use per-type default
 	protected boolean connectToDefined; // connect_to predicates present
-	protected Set<ResourceLocation> connectToBlocks = Set.of();
+	protected BiPredicate<EnumFacing, IBlockState> connectToPredicate;
 	protected int blocklight;
 	protected int skylight;
 	protected boolean hasLight;
@@ -118,8 +121,8 @@ public class CtmDefinition implements CtmProperties {
 		return connectToDefined;
 	}
 
-	public Set<ResourceLocation> getConnectToBlocks() {
-		return connectToBlocks;
+	public BiPredicate<EnumFacing, IBlockState> getConnectToPredicate() {
+		return connectToPredicate;
 	}
 
 	public int getBlocklight() {

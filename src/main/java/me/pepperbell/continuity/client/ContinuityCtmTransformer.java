@@ -101,6 +101,7 @@ public class ContinuityCtmTransformer implements BlockQuadTransformer {
 	 */
 	private void processQuadChain(BakedQuad input, IBlockState state, BlockPos pos, ActiniumBlockAccess blockAccess, long rand, ProcessingContextImpl context, ObjectArrayList<BakedQuad> output) {
 		BakedQuad current = input;
+		boolean firstPass = true;
 		for (int pass = 0; pass < MAX_PROCESSING_PASSES; pass++) {
 			TextureAtlasSprite sprite = current.getSprite();
 			if (sprite == null) {
@@ -109,7 +110,8 @@ public class ContinuityCtmTransformer implements BlockQuadTransformer {
 			}
 
 			QuadProcessors.Slice slice = QuadProcessors.getCache(state).apply(sprite);
-			if (slice.processors().length == 0) {
+			QuadProcessor[] processors = firstPass ? slice.processors() : slice.multipassProcessors();
+			if (processors.length == 0) {
 				output.add(current);
 				return;
 			}
@@ -118,8 +120,8 @@ public class ContinuityCtmTransformer implements BlockQuadTransformer {
 			boolean discarded = false;
 			boolean processed = false;
 			BakedQuad chained = null;
-			for (QuadProcessor processor : slice.processors()) {
-				QuadProcessor.ProcessingResult result = processor.processQuad(current, sprite, blockAccess, pos, state, state, rand, 0, context);
+			for (QuadProcessor processor : processors) {
+				QuadProcessor.ProcessingResult result = processor.processQuad(current, sprite, blockAccess, pos, state, state, rand, pass, context);
 				if (result == QuadProcessor.ProcessingResult.DISCARD) {
 					discarded = true;
 					break;
@@ -151,6 +153,7 @@ public class ContinuityCtmTransformer implements BlockQuadTransformer {
 			}
 			if (chained != null) {
 				current = chained;
+				firstPass = false;
 				continue;
 			}
 			if (!processed) {

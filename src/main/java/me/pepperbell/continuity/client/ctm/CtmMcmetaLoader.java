@@ -1,11 +1,15 @@
 package me.pepperbell.continuity.client.ctm;
 
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -16,6 +20,7 @@ import javax.annotation.Nullable;
 
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import me.pepperbell.continuity.client.ContinuityClient;
+import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.AbstractResourcePack;
 import net.minecraft.client.resources.IResource;
@@ -40,6 +45,8 @@ public final class CtmMcmetaLoader {
 	private final List<CtmDefinition> properties = new ObjectArrayList<>();
 	private final Set<ResourceLocation> invalidMetadata = new HashSet<>();
 	private final Set<ResourceLocation> unresolvedResources = new HashSet<>();
+	private final Set<ResourceLocation> processedMetadata = new HashSet<>();
+	private final Map<String, Integer> packPriorities = new HashMap<>();
 
 	private CtmMcmetaLoader(IResourceManager resourceManager) {
 		this.resourceManager = resourceManager;
@@ -72,7 +79,9 @@ public final class CtmMcmetaLoader {
 		for (IResourcePack pack : FMLClientHandler.instance().getResourcePackList()) {
 			if (seenPacks.add(pack.getPackName())) {
 				rememberDirectory(pack, scannedDirectories);
-				loadAll(pack, packPriority++);
+				int priority = packPriority++;
+				packPriorities.put(pack.getPackName(), priority);
+				loadAll(pack, priority);
 			}
 		}
 
@@ -80,14 +89,18 @@ public final class CtmMcmetaLoader {
 		for (ResourcePackRepository.Entry entry : repository.getRepositoryEntries()) {
 			if (seenPacks.add(entry.getResourcePackName())) {
 				rememberDirectory(entry.getResourcePack(), scannedDirectories);
-				loadAll(entry.getResourcePack(), packPriority++);
+				int priority = packPriority++;
+				packPriorities.put(entry.getResourcePackName(), priority);
+				loadAll(entry.getResourcePack(), priority);
 			}
 		}
 
 		IResourcePack serverPack = repository.getServerResourcePack();
 		if (serverPack != null && seenPacks.add(serverPack.getPackName())) {
 			rememberDirectory(serverPack, scannedDirectories);
-			loadAll(serverPack, packPriority++);
+			int priority = packPriority++;
+			packPriorities.put(serverPack.getPackName(), priority);
+			loadAll(serverPack, priority);
 		}
 
 		// B.A.S.E and Resource Loader expose namespace folders directly under these roots.
@@ -97,7 +110,9 @@ public final class CtmMcmetaLoader {
 			Path gameDir = Loader.instance().getConfigDir().getParentFile().toPath();
 			for (Path root : externalRoots(gameDir, scannedDirectories, resourceLoaderPresent)) {
 				String folder = root.getFileName().toString();
-				loadAll(folder, folder.equals("resources") ? -1 : packPriority++,
+				int priority = folder.equals("resources") ? -1 : packPriority++;
+				packPriorities.put(folder, priority);
+				loadAll(folder, priority,
 						consumer -> scanDirectory(root, consumer));
 				externalPackCount++;
 			}
@@ -111,7 +126,6 @@ public final class CtmMcmetaLoader {
 	}
 
 	private void loadAll(String packName, int packPriority, Consumer<BiConsumer<String, String>> scanner) {
-		int[] count = new int[1];
 		scanner.accept((namespace, path) -> {
 			if (!path.endsWith(".mcmeta") || !path.contains("/")) {
 				return;
@@ -126,41 +140,91 @@ public final class CtmMcmetaLoader {
 					? texturePath.substring("textures/".length(), texturePath.length() - ".png".length())
 					: texturePath.substring(0, texturePath.length() - ".png".length());
 			ResourceLocation baseTextureId = new ResourceLocation(namespace, spriteIdPath);
+			ResourceLocation baseTextureResourceId = new ResourceLocation(namespace, texturePath);
 			ResourceLocation metadataId = new ResourceLocation(namespace, texturePath + ".mcmeta");
-				try {
-					IResource resource = resourceManager.getResource(metadataId);
-					CtmMcmetaParser.ParseResult result = CtmMcmetaParser.parseDetailed(baseTextureId, resource, packName, packPriority);
-					if (result.invalid()) {
-						invalidMetadata.add(metadataId);
-					}
-					CtmDefinition parsed = result.definition();
-					if (parsed != null) {
-						// Proxy: the proxy target's definition replaces this one (the base texture
-						// behaves as the proxied texture).
-						if (parsed.getProxy() != null) {
-							ResourceLocation proxyId = new ResourceLocation(parsed.getProxy());
-							String proxyPath = "textures/" + proxyId.getPath() + ".png.mcmeta";
-							try {
-								IResource proxyResource = resourceManager.getResource(new ResourceLocation(proxyId.getNamespace(), proxyPath));
-								CtmDefinition proxyDef = CtmMcmetaParser.parse(parsed.getResourceId(), proxyResource, packName, packPriority);
-								if (proxyDef != null) {
-									CtmMcmetaParser.overrideBaseTexture(proxyDef, proxyId);
-									parsed = proxyDef;
-								}
-							} catch (Exception e) {
-								unresolvedResources.add(new ResourceLocation(proxyId.getNamespace(), proxyPath));
-								ContinuityClient.LOGGER.warn("Failed to resolve CTM proxy '" + parsed.getProxy() + "' for '" + baseTextureId + "'", e);
-							}
-						}
-						properties.add(parsed);
-						count[0]++;
-					}
-				} catch (Exception e) {
-					unresolvedResources.add(metadataId);
-					ContinuityClient.LOGGER.error("Failed to load CTM metadata from '" + namespace + ":" + texturePath + "' in pack '" + packName + "'", e);
+			if (!processedMetadata.add(metadataId)) {
+				return;
+			}
+			try (IResource ignored = resourceManager.getResource(baseTextureResourceId)) {
+				// Ignore orphan .mcmeta files; without their texture they cannot define a CTM sprite.
+			} catch (FileNotFoundException e) {
+				ContinuityClient.LOGGER.debug("Skipping CTM metadata '{}' because its texture is missing", metadataId);
+				return;
+			} catch (IOException e) {
+				ContinuityClient.LOGGER.warn("Unable to check base texture '{}' for CTM metadata", baseTextureResourceId, e);
+				return;
+			}
+			try (IResource resource = resourceManager.getResource(metadataId)) {
+				String metadataPackName = resource.getResourcePackName();
+				int metadataPackPriority = packPriorities.getOrDefault(metadataPackName, packPriority);
+				CtmMcmetaParser.ParseResult result = CtmMcmetaParser.parseDetailed(baseTextureId, resource,
+						metadataPackName, metadataPackPriority);
+				if (result.invalid()) {
+					invalidMetadata.add(metadataId);
 				}
+				CtmDefinition parsed = result.definition();
+				if (parsed == null) {
+					return;
+				}
+
+				// CTM Vintage proxies to the target texture's metadata; a target with no CTM
+				// section uses the default v1 texture definition and still proxies its base sprite.
+				if (parsed.getProxy() != null) {
+					ResourceLocation proxyId = new ResourceLocation(parsed.getProxy());
+					ResourceLocation proxyTextureId = getTextureResourceId(proxyId);
+					ResourceLocation proxyMetadataId = new ResourceLocation(proxyId.getNamespace(),
+							proxyTextureId.getPath() + ".mcmeta");
+					CtmDefinition proxyDef = null;
+					try (IResource proxyResource = resourceManager.getResource(proxyMetadataId)) {
+						String proxyPackName = proxyResource.getResourcePackName();
+						int proxyPackPriority = packPriorities.getOrDefault(proxyPackName, metadataPackPriority);
+						CtmMcmetaParser.ParseResult proxyResult = CtmMcmetaParser.parseDetailed(parsed.getResourceId(),
+								proxyResource, proxyPackName, proxyPackPriority);
+						proxyDef = proxyResult.definition();
+						if (proxyDef == null && proxyResult.invalid()) {
+							invalidMetadata.add(proxyMetadataId);
+						}
+						if (proxyDef == null && !proxyResult.invalid()) {
+							proxyDef = createDefaultProxyDefinition(parsed.getResourceId(),
+									proxyPackName, proxyPackPriority);
+						}
+					} catch (FileNotFoundException e) {
+						proxyDef = createDefaultProxyDefinition(parsed.getResourceId(),
+								metadataPackName, metadataPackPriority);
+					} catch (Exception e) {
+						unresolvedResources.add(proxyMetadataId);
+						ContinuityClient.LOGGER.warn("Failed to resolve CTM proxy '" + parsed.getProxy() + "' for '" + baseTextureId + "'", e);
+					}
+					if (proxyDef != null) {
+						CtmMcmetaParser.overrideBaseTexture(proxyDef, proxyId);
+						parsed = proxyDef;
+					}
+				}
+
+				properties.add(parsed);
+			} catch (Exception e) {
+				unresolvedResources.add(metadataId);
+				ContinuityClient.LOGGER.error("Failed to load CTM metadata from '" + namespace + ":" + texturePath + "' in pack '" + packName + "'", e);
+			}
 		});
-		ContinuityClient.LOGGER.debug("Loaded {} CTM Mod definitions in pack '{}'", count[0], packName);
+	}
+
+	private static CtmDefinition createDefaultProxyDefinition(ResourceLocation baseTextureId, String packName,
+			int packPriority) {
+		JsonObject defaultCtm = new JsonObject();
+		defaultCtm.addProperty("ctm_version", 1);
+		return CtmMcmetaParser.parse(baseTextureId, defaultCtm, packName, packPriority);
+	}
+
+	private static ResourceLocation getTextureResourceId(ResourceLocation spriteId) {
+		String path = spriteId.getPath();
+		if (!path.startsWith("textures/")) {
+			path = "textures/" + path;
+		}
+		if (!path.endsWith(".png")) {
+			path += ".png";
+		}
+		return new ResourceLocation(spriteId.getNamespace(), path);
 	}
 
 	private static void rememberDirectory(IResourcePack pack, Set<Path> scannedDirectories) {

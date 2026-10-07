@@ -349,6 +349,39 @@ public final class QuadClipper {
 		return new BakedQuad(data, quad.getTintIndex(), quad.getFace(), toSprite, true, format);
 	}
 
+	/** Assigns the whole output submap to the clipped quad, matching CTM Vintage's {@code setUVs}. */
+	public static BakedQuad setUVs(BakedQuad quad, TextureAtlasSprite toSprite, CtmSubmap submap) {
+		VertexFormat format = quad.getFormat();
+		int[] data = quad.getVertexData().clone();
+		float minU = Float.MAX_VALUE;
+		float minV = Float.MAX_VALUE;
+		float maxU = -Float.MAX_VALUE;
+		float maxV = -Float.MAX_VALUE;
+		for (int i = 0; i < 4; i++) {
+			minU = Math.min(minU, getU(quad, i));
+			minV = Math.min(minV, getV(quad, i));
+			maxU = Math.max(maxU, getU(quad, i));
+			maxV = Math.max(maxV, getV(quad, i));
+		}
+
+		float targetMinU = toSprite.getMinU() + (toSprite.getMaxU() - toSprite.getMinU()) * submap.getMinU();
+		float targetMaxU = toSprite.getMinU() + (toSprite.getMaxU() - toSprite.getMinU()) * submap.getMaxU();
+		float targetMinV = toSprite.getMinV() + (toSprite.getMaxV() - toSprite.getMinV()) * submap.getMinV();
+		float targetMaxV = toSprite.getMinV() + (toSprite.getMaxV() - toSprite.getMinV()) * submap.getMaxV();
+
+		for (int i = 0; i < 4; i++) {
+			float u = getU(quad, i);
+			float v = getV(quad, i);
+			float uFraction = maxU == minU ? 0.5f : (u - minU) / (maxU - minU);
+			float vFraction = maxV == minV ? 0.5f : (v - minV) / (maxV - minV);
+			int uvIndex = format.getUvOffsetById(0) / 4 + i * format.getIntegerSize();
+			data[uvIndex] = Float.floatToIntBits(lerp(targetMinU, targetMaxU, uFraction));
+			data[uvIndex + 1] = Float.floatToIntBits(lerp(targetMinV, targetMaxV, vFraction));
+		}
+
+		return new BakedQuad(data, quad.getTintIndex(), quad.getFace(), toSprite, true, format);
+	}
+
 	/**
 	 * Rotates a quad's UVs in sprite space. 0 = identity, 1 = 90° (u,v)->(v,1-u), 2 = 180°,
 	 * 3 = 270° (matching the CTM format's {@code Quad.rotate}).
@@ -389,6 +422,37 @@ public final class QuadClipper {
 			int uvIndex = format.getUvOffsetById(0) / 4 + i * format.getIntegerSize();
 			data[uvIndex] = Float.floatToIntBits(srcMinU + nu * srcW);
 			data[uvIndex + 1] = Float.floatToIntBits(srcMinV + nv * srcH);
+		}
+
+		return new BakedQuad(data, quad.getTintIndex(), quad.getFace(), sprite, true, format);
+	}
+
+	/** Applies a small UV offset only to the interior vertices of a subdivided quad. */
+	public static BakedQuad offsetInteriorUv(BakedQuad quad, BakedQuad uvSource, TextureAtlasSprite sprite,
+			float offsetU, float offsetV) {
+		VertexFormat format = quad.getFormat();
+		int[] data = quad.getVertexData().clone();
+		float minU = Float.MAX_VALUE;
+		float minV = Float.MAX_VALUE;
+		float maxU = -Float.MAX_VALUE;
+		float maxV = -Float.MAX_VALUE;
+		for (int i = 0; i < 4; i++) {
+			minU = Math.min(minU, getU(uvSource, i));
+			minV = Math.min(minV, getV(uvSource, i));
+			maxU = Math.max(maxU, getU(uvSource, i));
+			maxV = Math.max(maxV, getV(uvSource, i));
+		}
+
+		for (int i = 0; i < 4; i++) {
+			float u = getU(quad, i);
+			float v = getV(quad, i);
+			if (u != minU && u != maxU && v != minV && v != maxV) {
+				float normalizedU = normalize(minU, maxU, u) + offsetU;
+				float normalizedV = normalize(minV, maxV, v) + offsetV;
+				int uvIndex = format.getUvOffsetById(0) / 4 + i * format.getIntegerSize();
+				data[uvIndex] = Float.floatToIntBits(lerp(minU, maxU, normalizedU));
+				data[uvIndex + 1] = Float.floatToIntBits(lerp(minV, maxV, normalizedV));
+			}
 		}
 
 		return new BakedQuad(data, quad.getTintIndex(), quad.getFace(), sprite, true, format);

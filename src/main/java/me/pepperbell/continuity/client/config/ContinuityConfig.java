@@ -40,6 +40,7 @@ public class ContinuityConfig {
 	public final Option.BooleanOption connectedTextures = addOption(new Option.BooleanOption("connected_textures", true));
 	public final Option.BooleanOption emissiveTextures = addOption(new Option.BooleanOption("emissive_textures", true));
 	public final Option.BooleanOption ctmModTextures = addOption(new Option.BooleanOption("ctm_mod_textures", true));
+	public final Option.BooleanOption ctmConnectInside = addOption(new Option.BooleanOption("ctm_connect_inside", false));
 
 	public ContinuityConfig(File file) {
 		this.file = file;
