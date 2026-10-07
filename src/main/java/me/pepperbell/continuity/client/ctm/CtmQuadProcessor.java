@@ -116,6 +116,12 @@ public class CtmQuadProcessor implements QuadProcessor {
 		handleCtmWithConnections(quad, sprite, connections, out, false);
 	}
 
+	/** Keeps the original classic-CTM helper signature used by existing callers and tests. */
+	protected void handleCtmWithConnections(BakedQuad quad, TextureAtlasSprite sprite, int connections,
+			List<BakedQuad> out) {
+		handleCtmWithConnections(quad, sprite, connections, out, false);
+	}
+
 	protected void handleCtmWithConnections(BakedQuad quad, TextureAtlasSprite sprite, int connections,
 			List<BakedQuad> out, boolean includeIsolatedCorners) {
 		int[] submapIndices = CtmCtmLogic.getSubmapIndices(connections, connectionMap, includeIsolatedCorners);
