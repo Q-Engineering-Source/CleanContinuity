@@ -26,6 +26,12 @@ public final class BakedQuadLightmap {
 			data[index] = Math.max(previous & 0xFFFF, blocklight << 4)
 					| (Math.max((previous >>> 16) & 0xFFFF, skylight << 4) << 16);
 		}
+		if (quad instanceof EmissiveBakedQuad emissive) {
+			return emissive.withVertexData(data, targetFormat);
+		}
+		if (quad instanceof OverlayBakedQuad overlay) {
+			return overlay.withVertexData(data, targetFormat);
+		}
 		return new BakedQuad(data, quad.getTintIndex(), quad.getFace(), quad.getSprite(),
 				quad.shouldApplyDiffuseLighting(), targetFormat);
 	}

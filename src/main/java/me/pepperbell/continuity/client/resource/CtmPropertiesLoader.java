@@ -1,6 +1,7 @@
 package me.pepperbell.continuity.client.resource;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,6 +26,7 @@ import me.pepperbell.continuity.api.client.CtmProperties;
 import me.pepperbell.continuity.api.client.QuadProcessor;
 import me.pepperbell.continuity.client.ContinuityClient;
 import me.pepperbell.continuity.client.model.QuadProcessors;
+import me.pepperbell.continuity.client.properties.overlay.StandardOverlayCtmProperties;
 import me.pepperbell.continuity.client.util.biome.BiomeHolderManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
@@ -39,6 +41,7 @@ public class CtmPropertiesLoader {
 	private final IResourceManager resourceManager;
 	private final List<LoadingContainer<?>> containers = new ObjectArrayList<>();
 	private final Set<ResourceLocation> blockAtlasSpriteDependencies = new ObjectOpenHashSet<>();
+	private final Set<ResourceLocation> missingBlockAtlasSpriteDependencies = new ObjectOpenHashSet<>();
 
 	private CtmPropertiesLoader(IResourceManager resourceManager) {
 		this.resourceManager = resourceManager;
@@ -79,6 +82,9 @@ public class CtmPropertiesLoader {
 
 		containers.sort(Comparator.reverseOrder());
 		ContinuityClient.LOGGER.debug("Loaded {} CTM property containers from {} packs", containers.size(), seenPacks.size());
+		if (!missingBlockAtlasSpriteDependencies.isEmpty()) {
+			ContinuityClient.LOGGER.debug("Skipped {} missing CTM tile sprites", missingBlockAtlasSpriteDependencies.size());
+		}
 		return new LoadingResult(containers, blockAtlasSpriteDependencies);
 	}
 
@@ -115,7 +121,33 @@ public class CtmPropertiesLoader {
 		if (ctmProperties != null) {
 			LoadingContainer<T> container = new LoadingContainer<>(loader, ctmProperties);
 			containers.add(container);
-			blockAtlasSpriteDependencies.addAll(ctmProperties.getSpriteDependencies());
+			for (ResourceLocation spriteId : ctmProperties.getSpriteDependencies()) {
+				if (hasSpriteResource(spriteId)) {
+					blockAtlasSpriteDependencies.add(spriteId);
+				} else {
+					missingBlockAtlasSpriteDependencies.add(spriteId);
+				}
+			}
+		}
+	}
+
+	private boolean hasSpriteResource(ResourceLocation spriteId) {
+		String spritePath = spriteId.getPath();
+		if (!spritePath.endsWith(".png")) {
+			spritePath += ".png";
+		}
+		ResourceLocation atlasResource = new ResourceLocation(spriteId.getNamespace(), "textures/" + spritePath);
+		ResourceLocation redirected = ResourceRedirectHandler.redirect(atlasResource);
+		String resourcePath = redirected.getPath();
+		if (!resourcePath.startsWith("textures/")
+				&& !resourcePath.startsWith("optifine/")
+				&& !resourcePath.startsWith("mcpatcher/")) {
+			resourcePath = "textures/" + resourcePath;
+		}
+		try (var ignored = resourceManager.getResource(new ResourceLocation(redirected.getNamespace(), resourcePath))) {
+			return true;
+		} catch (IOException e) {
+			return false;
 		}
 	}
 
@@ -223,6 +255,16 @@ public class CtmPropertiesLoader {
 
 		public Set<ResourceLocation> getBlockAtlasSpriteDependencies() {
 			return blockAtlasSpriteDependencies;
+		}
+
+		public List<StandardOverlayCtmProperties> getOverlayProperties() {
+			List<StandardOverlayCtmProperties> overlays = new ObjectArrayList<>();
+			for (LoadingContainer<?> container : containers) {
+				if (container.properties() instanceof StandardOverlayCtmProperties properties) {
+					overlays.add(properties);
+				}
+			}
+			return overlays;
 		}
 	}
 }

@@ -24,7 +24,7 @@ public class ContinuityTextureEvents {
 
 	@SubscribeEvent
 	public void onTextureStitchPre(TextureStitchEvent.Pre event) {
-		CtmRenderLayerRouter.reload(List.of());
+		CtmRenderLayerRouter.reload(List.of(), List.of());
 		EmissiveSuffixLoader.load(Minecraft.getMinecraft().getResourceManager());
 		EmissiveSpriteApiImpl.INSTANCE.clear();
 		lastResult = CtmPropertiesLoader.loadAll();
@@ -72,7 +72,6 @@ public class ContinuityTextureEvents {
 		if (ContinuityConfig.INSTANCE.ctmModTextures.get()) {
 			ctmDefinitions = CtmMcmetaLoader.loadAll();
 			ctmDefinitionsLoaded = ctmDefinitions.size();
-			CtmRenderLayerRouter.reload(ctmDefinitions);
 			for (CtmDefinition definition : ctmDefinitions) {
 				TextureAtlasSprite stitched = textureMap.mapUploadedSprites.get(definition.getResourceId().toString());
 				if (definition.getLayer() != null && definition.getLayer().name().equals("BLOOM")
@@ -87,6 +86,7 @@ public class ContinuityTextureEvents {
 			}
 			ContinuityClient.LOGGER.debug("Reloaded {} CTM Mod processor holders", ctmDefinitions.size());
 		}
+		CtmRenderLayerRouter.reload(ctmDefinitions, lastResult.getOverlayProperties());
 
 		QuadProcessors.reload(processorHolders);
 		String suffix = EmissiveSuffixLoader.getEmissiveSuffix();

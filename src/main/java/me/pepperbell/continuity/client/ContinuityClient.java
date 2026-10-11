@@ -8,6 +8,7 @@ import me.pepperbell.continuity.api.client.QuadProcessor;
 import me.pepperbell.continuity.client.processor.BaseCachingPredicates;
 import me.pepperbell.continuity.client.processor.ProcessingDataKeys;
 import me.pepperbell.continuity.client.processor.TopQuadProcessor;
+import me.pepperbell.continuity.client.processor.overlay.StandardOverlayQuadProcessor;
 import me.pepperbell.continuity.client.processor.simple.CtmSpriteProvider;
 import me.pepperbell.continuity.client.processor.simple.FixedSpriteProvider;
 import me.pepperbell.continuity.client.processor.simple.HorizontalSpriteProvider;
@@ -20,6 +21,7 @@ import me.pepperbell.continuity.client.properties.ConnectingCtmProperties;
 import me.pepperbell.continuity.client.properties.OrientedConnectingCtmProperties;
 import me.pepperbell.continuity.client.properties.RandomCtmProperties;
 import me.pepperbell.continuity.client.properties.RepeatCtmProperties;
+import me.pepperbell.continuity.client.properties.overlay.StandardOverlayCtmProperties;
 import me.pepperbell.continuity.client.properties.TileAmountValidator;
 import net.minecraft.util.ResourceLocation;
 import org.apache.logging.log4j.LogManager;
@@ -171,5 +173,25 @@ public final class ContinuityClient {
 			}
 		};
 		registry.registerLoader("repeat", repeatLoader);
+
+		CtmLoader<StandardOverlayCtmProperties> overlayLoader = new CtmLoader<>() {
+			@Override
+			public CtmProperties.Factory<StandardOverlayCtmProperties> getPropertiesFactory() {
+				return TileAmountValidator.wrapFactory(
+						BaseCtmProperties.wrapFactory(StandardOverlayCtmProperties::new),
+						new TileAmountValidator.AtLeast<>(17));
+			}
+
+			@Override
+			public QuadProcessor.Factory<StandardOverlayCtmProperties> getProcessorFactory() {
+				return new StandardOverlayQuadProcessor.Factory();
+			}
+
+			@Override
+			public CachingPredicates.Factory<StandardOverlayCtmProperties> getPredicatesFactory() {
+				return new BaseCachingPredicates.Factory<>(true);
+			}
+		};
+		registry.registerLoader("overlay", overlayLoader);
 	}
 }

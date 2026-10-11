@@ -24,12 +24,135 @@ import me.pepperbell.continuity.client.resource.ResourceRedirectHandler;
 import net.minecraft.block.Block;
 import net.minecraft.block.properties.IProperty;
 import net.minecraft.block.state.IBlockState;
+import net.minecraft.init.Blocks;
 import net.minecraft.util.ResourceLocation;
 
 public final class PropertiesParsingHelper {
 	public static final Predicate<IBlockState> EMPTY_BLOCK_STATE_PREDICATE = state -> false;
+	private static final Map<String, String> LEGACY_VANILLA_BLOCK_STATES = Map.ofEntries(
+			Map.entry("grass_block", "grass"),
+			Map.entry("dirt_path", "grass_path"),
+			Map.entry("dirt_path_top", "grass_path"),
+			Map.entry("bricks", "brick_block"),
+			Map.entry("end_stone_bricks", "end_bricks"),
+			Map.entry("nether_bricks", "nether_brick"),
+			Map.entry("red_nether_bricks", "red_nether_brick"),
+			Map.entry("stone_bricks", "stonebrick:variant=stonebrick"),
+			Map.entry("mossy_stone_bricks", "stonebrick:variant=mossy_stonebrick"),
+			Map.entry("cracked_stone_bricks", "stonebrick:variant=cracked_stonebrick"),
+			Map.entry("chiseled_stone_bricks", "stonebrick:variant=chiseled_stonebrick"),
+			Map.entry("coarse_dirt", "dirt:variant=coarse_dirt"),
+			Map.entry("podzol", "dirt:variant=podzol"),
+			Map.entry("granite", "stone:variant=granite"),
+			Map.entry("diorite", "stone:variant=diorite"),
+			Map.entry("andesite", "stone:variant=andesite"),
+			Map.entry("polished_granite", "stone:variant=smooth_granite"),
+			Map.entry("polished_diorite", "stone:variant=smooth_diorite"),
+			Map.entry("polished_andesite", "stone:variant=smooth_andesite"),
+			Map.entry("red_sand", "sand:variant=red_sand"),
+			Map.entry("cut_sandstone", "sandstone:variant=smooth_sandstone"),
+			Map.entry("smooth_sandstone", "sandstone:variant=smooth_sandstone"),
+			Map.entry("chiseled_sandstone", "sandstone:variant=chiseled_sandstone"),
+			Map.entry("cut_red_sandstone", "red_sandstone:variant=smooth_red_sandstone"),
+			Map.entry("smooth_red_sandstone", "red_sandstone:variant=smooth_red_sandstone"),
+			Map.entry("chiseled_red_sandstone", "red_sandstone:variant=chiseled_red_sandstone"),
+			Map.entry("snow_block", "snow"),
+			Map.entry("nether_quartz_ore", "quartz_ore"),
+			Map.entry("prismarine_bricks", "prismarine:variant=prismarine_bricks"),
+			Map.entry("oak_log", "log:variant=oak"),
+			Map.entry("spruce_log", "log:variant=spruce"),
+			Map.entry("birch_log", "log:variant=birch"),
+			Map.entry("jungle_log", "log:variant=jungle"),
+			Map.entry("acacia_log", "log2:variant=acacia"),
+			Map.entry("dark_oak_log", "log2:variant=dark_oak"),
+			Map.entry("oak_wood", "log:variant=oak"),
+			Map.entry("spruce_wood", "log:variant=spruce"),
+			Map.entry("birch_wood", "log:variant=birch"),
+			Map.entry("jungle_wood", "log:variant=jungle"),
+			Map.entry("acacia_wood", "log2:variant=acacia"),
+			Map.entry("dark_oak_wood", "log2:variant=dark_oak"),
+			Map.entry("oak_planks", "planks:variant=oak"),
+			Map.entry("spruce_planks", "planks:variant=spruce"),
+			Map.entry("birch_planks", "planks:variant=birch"),
+			Map.entry("jungle_planks", "planks:variant=jungle"),
+			Map.entry("acacia_planks", "planks:variant=acacia"),
+			Map.entry("dark_oak_planks", "planks:variant=dark_oak"),
+			Map.entry("terracotta", "hardened_clay"),
+			Map.entry("stone_slab", "stone_slab:variant=stone"),
+			Map.entry("cobblestone_slab", "stone_slab:variant=cobblestone"),
+			Map.entry("mossy_cobblestone_slab", "stone_slab:variant=cobblestone"),
+			Map.entry("brick_slab", "stone_slab:variant=brick"),
+			Map.entry("stone_brick_slab", "stone_slab:variant=stone_brick"),
+			Map.entry("mossy_stone_brick_slab", "stone_slab:variant=stone_brick"),
+			Map.entry("nether_brick_slab", "stone_slab:variant=nether_brick"),
+			Map.entry("sandstone_slab", "stone_slab:variant=sandstone"),
+			Map.entry("smooth_sandstone_slab", "stone_slab:variant=sandstone"),
+			Map.entry("red_sandstone_slab", "stone_slab2:variant=red_sandstone"),
+			Map.entry("smooth_red_sandstone_slab", "stone_slab2:variant=red_sandstone"),
+			Map.entry("purpur_slab", "purpur_slab"));
 
 	private PropertiesParsingHelper() {
+	}
+
+	/** Maps modern vanilla block names to the closest 1.12.2 block state when one exists. */
+	public static ResourceLocation resolveLegacyVanillaBlockId(ResourceLocation blockId) {
+		if (!blockId.getNamespace().equals("minecraft")) {
+			return blockId;
+		}
+		String legacyState = legacyVanillaBlockState(blockId.getPath());
+		return new ResourceLocation(blockId.getNamespace(), legacyState.split(":", 2)[0]);
+	}
+
+	private static String legacyVanillaBlockState(String blockState) {
+		String[] parts = blockState.split(":");
+		String namespace = "minecraft";
+		String blockName;
+		int propertyStart;
+		if (parts.length > 1 && !parts[1].contains("=")) {
+			namespace = parts[0];
+			blockName = parts[1];
+			propertyStart = 2;
+		} else {
+			blockName = parts[0];
+			propertyStart = 1;
+		}
+		if (!namespace.equals("minecraft")) {
+			return blockState;
+		}
+
+		String legacyState = LEGACY_VANILLA_BLOCK_STATES.get(blockName);
+		if (legacyState == null) {
+			legacyState = legacyColorBlockState(blockName);
+		}
+		if (legacyState == null) {
+			return blockState;
+		}
+
+		StringBuilder result = new StringBuilder(legacyState);
+		for (int i = propertyStart; i < parts.length; i++) {
+			String property = parts[i];
+			if (property.startsWith("type=") && blockName.endsWith("_slab")) {
+				property = "half=" + property.substring("type=".length());
+			}
+			result.append(':').append(property);
+		}
+		return result.toString();
+	}
+
+	@Nullable
+	private static String legacyColorBlockState(String blockName) {
+		String[] colors = {"white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray",
+				"silver", "light_gray", "cyan", "purple", "blue", "brown", "green", "red", "black"};
+		for (String color : colors) {
+			String legacyColor = color.equals("light_gray") ? "silver" : color;
+			if (blockName.equals(color + "_terracotta")) {
+				return "stained_hardened_clay:color=" + legacyColor;
+			}
+			if (blockName.equals(color + "_concrete_powder")) {
+				return "concrete_powder:color=" + legacyColor;
+			}
+		}
+		return null;
 	}
 
 	@Nullable
@@ -127,7 +250,7 @@ public final class PropertiesParsingHelper {
 
 			Block:
 			for (int i = 0; i < blockStateStrs.length; i++) {
-				String blockStateStr = blockStateStrs[i].trim();
+				String blockStateStr = legacyVanillaBlockState(blockStateStrs[i].trim());
 				if (blockStateStr.isEmpty()) {
 					continue;
 				}
@@ -139,10 +262,15 @@ public final class PropertiesParsingHelper {
 				if (isNumericBlockId(blockStateStr)) {
 					// OptiFine/MCPatcher packs for 1.12.2 commonly use legacy numeric block ids.
 					// Resolve them through the same registry used by vanilla's numeric block lookup.
+					int numericBlockId = Integer.parseInt(blockStateStr);
 					try {
-						block = Block.getBlockById(Integer.parseInt(blockStateStr));
+						block = Block.getBlockById(numericBlockId);
 					} catch (NumberFormatException e) {
 						block = null;
+					}
+					if (block == null || (numericBlockId != 0 && block == Blocks.AIR)) {
+						ContinuityClient.LOGGER.warn("Unknown block id '{}' in '{}' element '{}' at index {} in file '{}' in pack '{}'", numericBlockId, propertyKey, blockStateStr, i, fileLocation, packId);
+						continue;
 					}
 					ResourceLocation registeredId = block == null ? null : Block.REGISTRY.getNameForObject(block);
 					blockId = registeredId == null ? new ResourceLocation("minecraft", blockStateStr) : registeredId;
@@ -158,7 +286,7 @@ public final class PropertiesParsingHelper {
 					block = Block.REGISTRY.getObject(blockId);
 				}
 
-				if (block == null) {
+				if (block == null || !Block.REGISTRY.containsKey(blockId)) {
 					ContinuityClient.LOGGER.warn("Unknown block '" + blockId + "' in '" + propertyKey + "' element '" + blockStateStr + "' at index " + i + " in file '" + fileLocation + "' in pack '" + packId + "'");
 					continue;
 				}
@@ -246,7 +374,6 @@ public final class PropertiesParsingHelper {
 							return true;
 						});
 					});
-
 					return state -> {
 						Predicate<IBlockState> predicate = predicateMap.get(state.getBlock());
 						return predicate != null && predicate.test(state);

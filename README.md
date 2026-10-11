@@ -30,7 +30,7 @@ CleanContinuity 在 1.12.2 上使用 Cleanroom Loader 提供的现代 Java 与 M
 
 ## ✨特性
 
-- OptiFine 连接纹理: `ctm` / `glass` / `horizontal` / `bookshelf` / `vertical` / `top` / `fixed` / `random` / `repeat`.
+- OptiFine 连接纹理: `ctm` / `glass` / `horizontal` / `bookshelf` / `vertical` / `top` / `fixed` / `random` / `repeat` / `overlay` (17 tiles).
 - OptiFine 发光纹理: `_e` 后缀发光贴图, 支持方块与物品.
 - CTM Mod 格式兼容: `.png.mcmeta` 的 `"ctm"` section (v1 类型) 与 `ctm.json` + `ctm_logic/*.json` 自定义真值表, 含 `proxy` 转发.
 - CTM 元数据也可从 B.A.S.E / Resource Loader 的 `resources` 目录加载; 支持 `layer`、`extra.light` 和跨方块 `extra.connect_to`. 对 `_e` 贴图设置 `extra.emissive_fallback: true` 可在分层泛光时保留原图层的全亮发光.
@@ -67,7 +67,7 @@ On 1.12.2, CleanContinuity uses modern Java and Mixin from Cleanroom Loader, bui
 
 ## ✨Features
 
-- OptiFine connected textures: `ctm` / `glass` / `horizontal` / `bookshelf` / `vertical` / `top` / `fixed` / `random` / `repeat`.
+- OptiFine connected textures: `ctm` / `glass` / `horizontal` / `bookshelf` / `vertical` / `top` / `fixed` / `random` / `repeat` / `overlay` (17 tiles).
 - OptiFine emissive textures: `_e`-suffixed emissive textures for blocks and items.
 - CTM Mod format compatibility: `"ctm"` section of `.png.mcmeta` (v1 types) and `ctm.json` + `ctm_logic/*.json` custom truth tables, including `proxy` forwarding.
 - CTM metadata also loads from B.A.S.E / Resource Loader `resources` roots, with `layer`, `extra.light`, and cross-block `extra.connect_to`. Set `extra.emissive_fallback: true` on an `_e` texture to keep its full-bright overlay in the original layer alongside routed Bloom.

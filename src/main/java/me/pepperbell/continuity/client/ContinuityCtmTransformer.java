@@ -1,6 +1,9 @@
 package me.pepperbell.continuity.client;
 
 import java.util.List;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
 
 import com.dhj.actinium.api.render.terrain.BlockQuadTransformer;
 import com.dhj.actinium.world.cloned.ActiniumBlockAccess;
@@ -9,6 +12,7 @@ import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import me.pepperbell.continuity.api.client.EmissiveSpriteApi;
 import me.pepperbell.continuity.api.client.QuadProcessor;
 import me.pepperbell.continuity.client.model.EmissiveBakedQuad;
+import me.pepperbell.continuity.client.model.OverlayBakedQuad;
 import me.pepperbell.continuity.client.model.BakedQuadLightmap;
 import me.pepperbell.continuity.client.model.QuadProcessors;
 import me.pepperbell.continuity.client.config.ContinuityConfig;
@@ -40,6 +44,8 @@ public class ContinuityCtmTransformer implements BlockQuadTransformer {
 		boolean routeCtmLayers = ContinuityConfig.INSTANCE.connectedTextures.get()
 				&& ContinuityConfig.INSTANCE.ctmModTextures.get();
 		boolean routedLayer = routeCtmLayers && CtmRenderLayerRouter.isRoutedLayer(state, layer);
+		boolean overlayRoutedLayer = ContinuityConfig.INSTANCE.connectedTextures.get()
+				&& CtmRenderLayerRouter.isOverlayRoutedLayer(state, layer);
 
 		if (!ContinuityConfig.INSTANCE.connectedTextures.get()) {
 			for (BakedQuad quad : quads) {
@@ -58,13 +64,15 @@ public class ContinuityCtmTransformer implements BlockQuadTransformer {
 
 			for (BakedQuad quad : quads) {
 				if (quad instanceof EmissiveBakedQuad
-						&& routeCtmLayers && !CtmRenderLayerRouter.shouldProcessWrappedOverlay(
+						&& routeCtmLayers && !overlayRoutedLayer && !CtmRenderLayerRouter.shouldProcessWrappedOverlay(
 								quad.getSprite(), layer, routedLayer)) {
 					continue;
 				}
-				if (!routeCtmLayers || CtmRenderLayerRouter.shouldRender(quad.getSprite(), layer, routedLayer)) {
+				if (!routeCtmLayers || CtmRenderLayerRouter.shouldRender(quad.getSprite(), layer, routedLayer)
+						|| overlayRoutedLayer) {
 					int firstOutput = output.size();
 					processQuadChain(quad, state, pos, blockAccess, rand, context, output);
+					filterLayerOutputs(output, firstOutput, layer, routeCtmLayers, routedLayer, overlayRoutedLayer);
 					if (routeCtmLayers
 							&& CtmRenderLayerRouter.shouldFullbrightEmissiveFallback(quad.getSprite(), routedLayer)) {
 						for (int i = firstOutput; i < output.size(); i++) {
@@ -94,6 +102,23 @@ public class ContinuityCtmTransformer implements BlockQuadTransformer {
 		return output;
 	}
 
+	private static void filterLayerOutputs(ObjectArrayList<BakedQuad> output, int startIndex,
+			BlockRenderLayer layer, boolean routeCtmLayers, boolean routedLayer, boolean overlayRoutedLayer) {
+		for (int i = output.size() - 1; i >= startIndex; i--) {
+			BakedQuad quad = output.get(i);
+			boolean keep;
+			if (quad instanceof OverlayBakedQuad overlay) {
+				keep = overlay.getRenderLayer() == layer;
+			} else {
+				keep = !overlayRoutedLayer || (routeCtmLayers
+						&& CtmRenderLayerRouter.shouldRender(quad.getSprite(), layer, routedLayer));
+			}
+			if (!keep) {
+				output.remove(i);
+			}
+		}
+	}
+
 	/**
 	 * Processes a single quad through the CTM pipeline, re-applying rules when a processor replaces
 	 * the quad's sprite with a new one (MCPatcher variant -> repeat chaining). The chain is bounded
@@ -102,10 +127,15 @@ public class ContinuityCtmTransformer implements BlockQuadTransformer {
 	private void processQuadChain(BakedQuad input, IBlockState state, BlockPos pos, ActiniumBlockAccess blockAccess, long rand, ProcessingContextImpl context, ObjectArrayList<BakedQuad> output) {
 		BakedQuad current = input;
 		boolean firstPass = true;
+		ObjectArrayList<BakedQuad> additiveQuads = null;
+		Set<QuadProcessor> additiveProcessors = null;
 		for (int pass = 0; pass < MAX_PROCESSING_PASSES; pass++) {
 			TextureAtlasSprite sprite = current.getSprite();
 			if (sprite == null) {
 				output.add(current);
+				if (additiveQuads != null) {
+					output.addAll(additiveQuads);
+				}
 				return;
 			}
 
@@ -113,6 +143,9 @@ public class ContinuityCtmTransformer implements BlockQuadTransformer {
 			QuadProcessor[] processors = firstPass ? slice.processors() : slice.multipassProcessors();
 			if (processors.length == 0) {
 				output.add(current);
+				if (additiveQuads != null) {
+					output.addAll(additiveQuads);
+				}
 				return;
 			}
 
@@ -121,12 +154,25 @@ public class ContinuityCtmTransformer implements BlockQuadTransformer {
 			boolean processed = false;
 			BakedQuad chained = null;
 			for (QuadProcessor processor : processors) {
+				if (additiveProcessors != null && additiveProcessors.contains(processor)) {
+					continue;
+				}
+				context.getExtraQuads().clear();
 				QuadProcessor.ProcessingResult result = processor.processQuad(current, sprite, blockAccess, pos, state, state, rand, pass, context);
 				if (result == QuadProcessor.ProcessingResult.DISCARD) {
 					discarded = true;
 					break;
 				}
 				if (result == QuadProcessor.ProcessingResult.NEXT_PROCESSOR) {
+					if (!context.getExtraQuads().isEmpty()) {
+						if (additiveQuads == null) {
+							additiveQuads = new ObjectArrayList<>();
+							additiveProcessors = Collections.newSetFromMap(new IdentityHashMap<>());
+						}
+						additiveQuads.addAll(context.getExtraQuads());
+						context.getExtraQuads().clear();
+						additiveProcessors.add(processor);
+					}
 					continue;
 				}
 
@@ -159,9 +205,15 @@ public class ContinuityCtmTransformer implements BlockQuadTransformer {
 			if (!processed) {
 				output.add(current);
 			}
+			if (additiveQuads != null) {
+				output.addAll(additiveQuads);
+			}
 			return;
 		}
 		// Chain limit reached: emit whatever is left.
 		output.add(current);
+		if (additiveQuads != null) {
+			output.addAll(additiveQuads);
+		}
 	}
 }
